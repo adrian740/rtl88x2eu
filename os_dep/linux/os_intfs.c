@@ -371,6 +371,10 @@ int rtw_check_hw_status = 0;
 
 int rtw_low_power = 0;
 int rtw_wifi_spec = 0;
+#ifdef CONFIG_WIFI_MONITOR
+/* Let DIG follow the level of monitored traffic (see rtw_phydm_monitor_rssi_update()). */
+int rtw_monitor_dig = 1;
+#endif
 
 
 int rtw_trx_path_bmp = 0x00;
@@ -656,6 +660,10 @@ module_param(rtw_power_mgnt, int, 0644);
 module_param(rtw_smart_ps, int, 0644);
 module_param(rtw_low_power, int, 0644);
 module_param(rtw_wifi_spec, int, 0644);
+#ifdef CONFIG_WIFI_MONITOR
+module_param(rtw_monitor_dig, int, 0644);
+MODULE_PARM_DESC(rtw_monitor_dig, "In monitor mode, DIG follows the level of received traffic (1, default) or stays at the no-link lower bound (0)");
+#endif
 
 module_param(rtw_full_ch_in_p2p_handshake, int, 0644);
 module_param(rtw_antdiv_cfg, int, 0644);

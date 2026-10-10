@@ -4135,6 +4135,8 @@ int recv_frame_monitor(_adapter *padapter, union recv_frame *rframe)
 	if (rframe == NULL)
 		goto exit;
 
+	rtw_hal_monitor_rssi_record(padapter, &rframe->u.hdr.attrib);
+
 	/* read skb information from recv frame */
 	pskb = rframe->u.hdr.pkt;
 	pskb->len = rframe->u.hdr.len;
