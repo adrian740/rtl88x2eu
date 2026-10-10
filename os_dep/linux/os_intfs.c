@@ -4317,6 +4317,21 @@ int netdev_open(struct net_device *pnetdev)
 #endif
 	_exit_critical_mutex(&(adapter_to_dvobj(padapter)->hw_init_mutex), NULL);
 
+#ifdef CONFIG_MONITOR_MODE_XMIT
+	/*
+	 * Closing the interface turns the carrier off and runs the MLME disconnect, which
+	 * programs REG_RXFLTMAP2 to reject all data frames ("not linked"). For monitor mode only
+	 * cfg80211_rtw_change_iface() undoes both (rtw_setopmode_cmd() reapplies the monitor RX
+	 * filters, rtw_indicate_connect() turns the carrier on), but cfg80211 skips
+	 * change_iface() when the type does not change. So down -> set monitor -> up on an
+	 * interface already in monitor mode left the carrier off (every injected frame dropped)
+	 * and data-frame reception disabled. Replay the monitor branch of change_iface().
+	 */
+	if (ret == 0 && check_fwstate(&padapter->mlmepriv, WIFI_MONITOR_STATE) == _TRUE) {
+		rtw_setopmode_cmd(padapter, Ndis802_11Monitor, RTW_CMDF_WAIT_ACK);
+		rtw_indicate_connect(padapter);
+	}
+#endif
 
 #ifdef CONFIG_AUTO_AP_MODE
 	if (padapter->iface_id == IFACE_ID2)
