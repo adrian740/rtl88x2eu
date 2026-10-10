@@ -11620,6 +11620,8 @@ static void rtw_mlmeext_disconnect(_adapter *padapter)
 		self_action = MLME_STA_DISCONNECTED;
 	else if (MLME_IS_ADHOC(padapter) || MLME_IS_ADHOC_MASTER(padapter))
 		self_action = MLME_ADHOC_STOPPED;
+	else if (MLME_IS_MONITOR(padapter))
+		; /* closing a monitor interface: there is no link, so no MLME action to report */
 	else {
 		RTW_INFO("state:0x%x\n", MLME_STATE(padapter));
 		rtw_warn_on(1);
@@ -11681,7 +11683,13 @@ static void rtw_mlmeext_disconnect(_adapter *padapter)
 #endif
 
 	#ifdef CONFIG_DFS_MASTER
-	if (!CHK_MLME_STATE(padapter, WIFI_AP_STATE | WIFI_MESH_STATE | WIFI_OP_CH_SWITCHING)) {
+	/*
+	 * Radar detection is decided from linked STA/AP/mesh interfaces only. A monitor interface
+	 * is none of these, so closing it cannot change the decision; re-deciding with no MLME
+	 * action only tripped two WARN_ONs (here and in rtw_dfs_rd_en_decision()).
+	 */
+	if (!CHK_MLME_STATE(padapter, WIFI_AP_STATE | WIFI_MESH_STATE | WIFI_OP_CH_SWITCHING)
+		&& !(self_action == MLME_ACTION_UNKNOWN && MLME_IS_MONITOR(padapter))) {
 		/* radar detect status no need to check here for AP/MESH or iface under OPCH_SW */
 		rtw_dfs_rd_en_dec_on_mlme_act(padapter, NULL, self_action, 0);
 	}
