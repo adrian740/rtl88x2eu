@@ -35,6 +35,8 @@
 /*@--------------------Define ---------------------------------------*/
 
 /*@=== [DIG Boundary] ========================================*/
+/*@DIG following monitored traffic (dm->monitor_rssi): hard ceiling on desensitization*/
+#define	DIG_MAX_MONITOR			0x30
 /*@DIG coverage mode*/
 #define	DIG_MAX_COVERAGR		0x26
 #define	DIG_MIN_COVERAGE		0x1c

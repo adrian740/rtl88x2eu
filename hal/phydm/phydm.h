@@ -998,6 +998,13 @@ struct dm_struct {
 	boolean			is_wifi_direct;
 	boolean			is_wifi_display;
 	boolean			is_linked;
+	/*
+	 * Monitor mode has no link, so DIG would sit at its no-link lower bound forever. When the
+	 * driver measures the level of the monitored traffic it sets this (rssi_min scale, 0 =
+	 * none) and DIG treats it like rssi_min of a link; see phydm_dig_linked().
+	 */
+	u8			monitor_rssi;
+	u8			pre_monitor_rssi;
 	boolean			pre_is_linked;
 	boolean			first_connect;
 	boolean			first_disconnect;
