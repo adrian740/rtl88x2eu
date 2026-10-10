@@ -2604,6 +2604,13 @@ ifeq ($(CONFIG_RTL8723B), y)
 $(MODULE_NAME)-$(CONFIG_MP_INCLUDED)+= core/rtw_bt_mp.o
 endif
 
+# Linux 6.16+ no longer honors EXTRA_CFLAGS for external modules. Mirror the
+# fully-expanded EXTRA_CFLAGS (including the *.mk additions above) into Kbuild
+# ccflags so objects in core/, hal/, os_dep/ ... find their headers. Older
+# kernels (e.g. the RK3566 6.12 BSP) still honor EXTRA_CFLAGS; the repeated
+# -I/-D flags are identical, so their build is unchanged.
+subdir-ccflags-y += $(EXTRA_CFLAGS)
+
 obj-$(CONFIG_RTL8822EU) := $(MODULE_NAME).o
 
 else
