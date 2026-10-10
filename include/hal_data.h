@@ -570,6 +570,7 @@ typedef struct hal_com_data {
 	u8			INIDATA_RATE[MACID_NUM_SW_LIMIT];
 
 	struct dm_struct	 odmpriv;
+	struct wifi_only_cfg	wifionly_cfg;	/* this device's WiFi-only coex context */
 #ifdef CONFIG_WIFI_MONITOR
 	/*
 	 * Signal levels (rx_pwdb_all, 0~100) of good frames received in monitor mode during the
