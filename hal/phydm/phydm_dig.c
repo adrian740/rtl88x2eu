@@ -30,6 +30,21 @@
 #include "mp_precomp.h"
 #include "phydm_precomp.h"
 
+/*
+ * A monitor-mode receiver never links. When the driver measures the level of the monitored
+ * traffic (dm->monitor_rssi != 0), DIG runs its linked algorithm on that level instead of
+ * staying at the no-link lower bound, capped at DIG_MAX_MONITOR. Real links are unaffected.
+ */
+static boolean phydm_dig_linked(struct dm_struct *dm)
+{
+	return dm->is_linked || dm->monitor_rssi;
+}
+
+static u8 phydm_dig_rssi(struct dm_struct *dm)
+{
+	return dm->is_linked ? dm->rssi_min : dm->monitor_rssi;
+}
+
 #ifdef CFG_DIG_DAMPING_CHK
 void phydm_dig_recorder_reset(void *dm_void)
 {
@@ -207,8 +222,8 @@ void phydm_fa_threshold_check(void *dm_void, boolean is_dfs_band)
 
 	if (dig_t->is_dbg_fa_th) {
 		PHYDM_DBG(dm, DBG_DIG, "Manual Fix FA_th\n");
-	} else if (dm->is_linked) {
-		if (dm->rssi_min < 20) { /*@[PHYDM-252]*/
+	} else if (phydm_dig_linked(dm)) {
+		if (phydm_dig_rssi(dm) < 20) { /*@[PHYDM-252]*/
 			dig_t->fa_th[0] = 500;
 			dig_t->fa_th[1] = 750;
 			dig_t->fa_th[2] = 1000;
@@ -1132,7 +1147,7 @@ void phydm_dig_abs_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 
 		dig_t->dig_max_of_min = DIG_MIN_DFS;
 		dig_t->dm_dig_max = DIG_MAX_BALANCE_MODE;
-	} else if (!dm->is_linked) {
+	} else if (!phydm_dig_linked(dm)) {
 		dig_t->dm_dig_max = DIG_MAX_COVERAGR;
 		dig_t->dm_dig_min = DIG_MIN_COVERAGE;
 	} else {
@@ -1189,6 +1204,7 @@ void phydm_dig_dym_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 #endif
 	u8 offset = 15, tmp_max = 0;
 	u8 max_of_rssi_min = 0;
+	u8 rssi = phydm_dig_rssi(dm);
 
 	PHYDM_DBG(dm, DBG_DIG, "%s ======>\n", __func__);
 #ifdef CONFIG_RTL8672
@@ -1203,7 +1219,7 @@ void phydm_dig_dym_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 	offset = 15;
 	#endif
 
-	if (!dm->is_linked) {
+	if (!phydm_dig_linked(dm)) {
 		/*@if no link, always stay at lower bound*/
 		dig_t->rx_gain_range_max = dig_t->dig_max_of_min;
 		dig_t->rx_gain_range_min = dig_t->dm_dig_min;
@@ -1213,17 +1229,17 @@ void phydm_dig_dym_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 		return;
 	}
 
-	PHYDM_DBG(dm, DBG_DIG, "rssi_min=%d, ofst=%d\n", dm->rssi_min, offset);
+	PHYDM_DBG(dm, DBG_DIG, "rssi_min=%d, ofst=%d\n", rssi, offset);
 
 	/* @DIG lower bound */
 	if (is_dfs_band)
 		dig_t->rx_gain_range_min = dig_t->dm_dig_min;
-	else if (dm->rssi_min > dig_t->dig_max_of_min)
+	else if (rssi > dig_t->dig_max_of_min)
 		dig_t->rx_gain_range_min = dig_t->dig_max_of_min;
-	else if (dm->rssi_min < dig_t->dm_dig_min)
+	else if (rssi < dig_t->dm_dig_min)
 		dig_t->rx_gain_range_min = dig_t->dm_dig_min;
 	else
-		dig_t->rx_gain_range_min = dm->rssi_min;
+		dig_t->rx_gain_range_min = rssi;
 
 #ifdef CFG_DIG_DAMPING_CHK
 	/*@Limit Dyn min by damping*/
@@ -1243,10 +1259,10 @@ void phydm_dig_dym_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 #ifdef CONFIG_RTL8672
 	PHYDM_DBG(dm, DBG_DIG, "tmp_max= 0x%x, rx_gain_range_min= 0x%x\n", tmp_max, dig_t->rx_gain_range_min);
 #endif
-	if (dig_t->rx_gain_range_min != dm->rssi_min) {
-		max_of_rssi_min = dm->rssi_min + offset;
+	if (dig_t->rx_gain_range_min != rssi) {
+		max_of_rssi_min = rssi + offset;
 #ifdef CONFIG_RTL8672
-		PHYDM_DBG(dm, DBG_DIG, "max_of_rssi_min= 0x%x, rssi_min= 0x%x\n", max_of_rssi_min, dm->rssi_min );
+		PHYDM_DBG(dm, DBG_DIG, "max_of_rssi_min= 0x%x, rssi_min= 0x%x\n", max_of_rssi_min, rssi );
 #endif
 		if (tmp_max > max_of_rssi_min)
 			tmp_max = max_of_rssi_min;
@@ -1277,6 +1293,14 @@ void phydm_dig_dym_boundary_decision(struct dm_struct *dm, boolean is_dfs_band)
 			  dig_t->rx_gain_range_min, dig_t->ant_div_rssi_max);
 	}
 	#endif
+
+	if (!dm->is_linked) {
+		/* following monitored traffic: never desensitize past DIG_MAX_MONITOR */
+		if (dig_t->rx_gain_range_max > DIG_MAX_MONITOR)
+			dig_t->rx_gain_range_max = DIG_MAX_MONITOR;
+		if (dig_t->rx_gain_range_min > dig_t->rx_gain_range_max)
+			dig_t->rx_gain_range_min = dig_t->rx_gain_range_max;
+	}
 
 	PHYDM_DBG(dm, DBG_DIG, "Dyn{Max, Min}={0x%x, 0x%x}\n",
 		  dig_t->rx_gain_range_max, dig_t->rx_gain_range_min);
@@ -1361,7 +1385,7 @@ u8 phydm_get_new_igi(struct dm_struct *dm, u8 igi, u32 fa_metrics,
 		#endif
 		#endif
 		PHYDM_DBG(dm, DBG_DIG, "First connect: foce IGI=0x%x\n", igi);
-	} else if (dm->is_linked) {
+	} else if (phydm_dig_linked(dm)) {
 		PHYDM_DBG(dm, DBG_DIG, "Adjust IGI @ linked\n");
 		/* @4 Abnormal # beacon case */
 		#if (DM_ODM_SUPPORT_TYPE & (ODM_WIN | ODM_CE))
@@ -1383,7 +1407,8 @@ u8 phydm_get_new_igi(struct dm_struct *dm, u8 igi, u32 fa_metrics,
 		/* @2 Before link */
 		PHYDM_DBG(dm, DBG_DIG, "Adjust IGI before link\n");
 
-		if (dm->first_disconnect) {
+		if (dm->first_disconnect || dm->pre_monitor_rssi) {
+			/* also when monitored traffic stops: back to full sensitivity at once */
 			igi = dig_t->dm_dig_min;
 			PHYDM_DBG(dm, DBG_DIG,
 				  "First disconnect:foce IGI to lower bound\n");
@@ -1544,6 +1569,7 @@ void phydm_dig(void *dm_void)
 
 	/*Select new IGI by FA */
 	new_igi = phydm_get_new_igi(dm, igi, fa_metrics, dfs_mode_en, dm->retry_cnt);
+	dm->pre_monitor_rssi = dm->monitor_rssi;
 
 	/* @1 Update status */
 	#ifdef PHYDM_TDMA_DIG_SUPPORT

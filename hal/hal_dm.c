@@ -1021,6 +1021,7 @@ void SetHalODMVar(
 		_RTW_PRINT_SEL(sel, "============ Rx Info dump ===================\n");
 		_RTW_PRINT_SEL(sel, "is_linked = %d, rssi_min = %d(%%)(%d(%%)), current_igi = 0x%x\n"
 			, podmpriv->is_linked, rssi_min, rtw_dm_get_min_rssi(Adapter), cur_igi);
+		_RTW_PRINT_SEL(sel, "monitor_rssi = %d(%%)\n", podmpriv->monitor_rssi);
 		_RTW_PRINT_SEL(sel, "cnt_cck_fail = %d, cnt_ofdm_fail = %d, Total False Alarm = %d\n",
 			rtw_phydm_get_phy_cnt(Adapter, FA_CCK),
 			rtw_phydm_get_phy_cnt(Adapter, FA_OFDM),
@@ -1910,6 +1911,55 @@ exit:
 	odm_cmn_info_update(phydm, ODM_CMNINFO_ATHEROS_HWID, ATHEROS_HWID);
 }
 
+#ifdef CONFIG_WIFI_MONITOR
+/*
+ * Monitor-mode DIG input. In monitor mode the radio never links, so DIG stays at its no-link
+ * lower bound: maximum sensitivity, which a strong nearby transmitter overdrives (OFDM false
+ * alarms, lost frames). Each DIG period the 10th percentile of the level of good monitored
+ * frames is taken as the weakest significant traffic: at range that is the peer, and a few
+ * strong or weak foreign frames do not move it. DIG gets that level minus a fading margin and
+ * treats it like rssi_min of a link (phydm_dig_linked()), under a hard ceiling. With too few
+ * frames it gets 0, which is the stock no-link behaviour. rtw_monitor_dig=0 disables this.
+ */
+#define MON_DIG_MIN_FRAMES	10	/* per DIG period (2 s); an Air unit hears ~10 frames/s */
+#define MON_DIG_PERCENTILE	10
+#define MON_DIG_MARGIN		10	/* rssi_min units (~dB) kept below the measured level */
+
+extern int rtw_monitor_dig;
+
+void rtw_hal_monitor_rssi_record(_adapter *adapter, struct rx_pkt_attrib *attrib)
+{
+	PHAL_DATA_TYPE hal = GET_HAL_DATA(adapter);
+	u8 level = attrib->phy_info.rx_pwdb_all;
+
+	if (attrib->crc_err || attrib->icv_err || level == 0)
+		return;
+	hal->mon_rssi_hist[level > 100 ? 100 : level]++;
+}
+
+static void rtw_phydm_monitor_rssi_update(_adapter *adapter)
+{
+	PHAL_DATA_TYPE hal = GET_HAL_DATA(adapter);
+	u32 total = 0, seen = 0, target;
+	u8 level = 0;
+	int i;
+
+	for (i = 0; i <= 100; i++)
+		total += hal->mon_rssi_hist[i];
+	if (rtw_monitor_dig && total >= MON_DIG_MIN_FRAMES) {
+		target = (total * MON_DIG_PERCENTILE + 99) / 100;
+		for (i = 0; i < 100; i++) {
+			seen += hal->mon_rssi_hist[i];
+			if (seen >= target)
+				break;
+		}
+		level = i > MON_DIG_MARGIN ? (u8)(i - MON_DIG_MARGIN) : 0;
+	}
+	_rtw_memset(hal->mon_rssi_hist, 0, sizeof(hal->mon_rssi_hist));
+	hal->odmpriv.monitor_rssi = level;
+}
+#endif /* CONFIG_WIFI_MONITOR */
+
 void rtw_phydm_watchdog(_adapter *adapter, bool in_lps)
 {
 	u8	bLinked = _FALSE;
@@ -1977,6 +2027,10 @@ void rtw_phydm_watchdog(_adapter *adapter, bool in_lps)
 	#ifdef CONFIG_TDMADIG
 	rtw_phydm_tdmadig(adapter, TDMADIG_NON_INIT);
 	#endif/*CONFIG_TDMADIG*/
+
+	#ifdef CONFIG_WIFI_MONITOR
+	rtw_phydm_monitor_rssi_update(adapter);
+	#endif
 
 	if (in_lps)
 		phydm_watchdog_lps(&pHalData->odmpriv);
